@@ -22,7 +22,7 @@ jobs:
         
         - name: Build and push Docker image to ECR
           run: |
-            docker build -t medplus .
+            docker build -t medplus:v1 .
             docker tag medplus:v1 696035274327.dkr.ecr.us-east-1.amazonaws.com/medplus:v1
             docker push 696035274327.dkr.ecr.us-east-1.amazonaws.com/medplus:v1
         
