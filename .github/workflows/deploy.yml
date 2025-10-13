@@ -46,7 +46,8 @@ jobs:
 
         sed -i "s+696035274327.dkr.ecr.us-east-1.amazonaws.com/medplux:.*+696035274327.dkr.ecr.us-east-1.amazonaws.com/medplux:$GITHUB_RUN_NUMBER+g" deployment.yaml
         cat deployment.yaml
-
+        git config user.email support@digitalwitchng.online
+        git config user.name ${GIT_USERNAME}
         git add .
         git commit -m "Updated the k8s.yaml with new image tag"
         git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/digitalwitchdemo/kubernetes-manifest.git HEAD:main
