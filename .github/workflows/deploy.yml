@@ -29,15 +29,29 @@ jobs:
         docker build -t $IMAGE_URI .
         docker push $IMAGE_URI
 
-    # - name: Deploy to EC2 via SSH
-    #   uses: appleboy/ssh-action@v1.0.3
-    #   with:
-    #     host: ${{ secrets.EC2_HOST }}
-    #     username: ${{ secrets.EC2_USER }}
-    #     key: ${{ secrets.SSH_KEY }}
-    #     script: |
-    #       aws ecr get-login-password --region ${{ secrets.AWS_REGION }} | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
-    #       docker pull ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest
-    #       docker stop mediplus-container || true
-    #       docker rm mediplus-container || true
-    #       docker run -d -p 80:80 --name mediplus-container ${{ steps.login-ecr.outputs.registry }}/${{ secrets.ECR_REPOSITORY }}:latest
+
+  update-k8s-yaml:
+    runs-on: ubuntu-latest
+    needs: build_and_deploy
+
+    steps: 
+    - name: clone-k8s-yaml repo
+      env: 
+        GIT_USERNAME: ${{ secrets.GIT_USERNAME }}
+        GIT_PASSWORD: ${{ secrets.GIT_PASSWORD }}
+      run: |
+        git clone https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/digitalwitchdemo/kubernetes-manifest.git
+        cd kubernetes-manifest/medplux-yaml
+        cat deployment.yaml
+
+        sed -i "s+696035274327.dkr.ecr.us-east-1.amazonaws.com/medplux:.*+696035274327.dkr.ecr.us-east-1.amazonaws.com/medplux:$GITHUB_RUN_NUMBER+g" deployment.yaml
+        cat deployment.yaml
+
+        git add .
+        git commit -m "Updated the k8s.yaml with new image tag"
+        git push https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/digitalwitchdemo/kubernetes-manifest.git HEAD:main
+        
+      
+    
+      
+     
