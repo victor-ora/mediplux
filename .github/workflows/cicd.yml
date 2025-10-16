@@ -1,4 +1,4 @@
-name: Build and Push to Public ECR
+name: Build and Push to ECR
 
 on:
   push:
@@ -8,14 +8,8 @@ on:
 jobs:
   build-push:
     runs-on: ubuntu-latest
-
-    # CHANGEABLE:
     env:
-      # your public ECR alias (the short id like l4o1p0w6 from public.ecr.aws/<alias>)
-      ECR_PUBLIC_ALIAS: l4o1p0w6
-      # repo name in public ECR
-      ECR_REPOSITORY: mediplux-ecr
-      # image tag — change to automatic if you want (v${{ github.run_number }} etc.)
+      ECR_REPOSITORY: mediplux
       IMAGE_TAG: v1
 
     steps:
@@ -27,52 +21,30 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}  # public ECR typically uses us-east-1 but keep as secret
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon Public ECR (get password and login)
-        id: login-public
-        run: |
-          set -e
-          # fetch password (requires ecr-public:GetAuthorizationToken permission)
-          PW=$(aws ecr-public get-login-password --region "${{ secrets.AWS_REGION }}" ) || { echo "ERROR: failed to get public ECR login password — check IAM permissions (ecr-public:GetAuthorizationToken)"; exit 1; }
-          echo "$PW" | docker login --username AWS --password-stdin public.ecr.aws/${{ env.ECR_PUBLIC_ALIAS }}
-          echo "PUBLIC_REGISTRY=public.ecr.aws/${{ env.ECR_PUBLIC_ALIAS }}" >> $GITHUB_ENV
+      - name: Login to Amazon ECR (private registry)
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Ensure Public ECR repository exists (create if missing)
-        run: |
-          set -e
-          # describe will fail if repo doesn't exist; then create
-          if aws ecr-public describe-repositories --repository-names "${{ env.ECR_REPOSITORY }}" --region "${{ secrets.AWS_REGION }}" >/dev/null 2>&1; then
-            echo "Public repo '${{ env.ECR_REPOSITORY }}' exists."
-          else
-            echo "Public repo not found — creating '${{ env.ECR_REPOSITORY }}'."
-            aws ecr-public create-repository --repository-name "${{ env.ECR_REPOSITORY }}" --region "${{ secrets.AWS_REGION }}"
-          fi
+      # Optional: show which registry we will use (safe)
+      - name: Show registry (diagnostic)
+        run: echo "Registry = '${{ steps.login-ecr.outputs.registry }}'"
 
-      - name: Build, tag, and push image to Public ECR
+      - name: Build, tag, and push image to Amazon ECR
         run: |
-          set -e
-          # sanity checks
-          if [ -z "${{ env.PUBLIC_REGISTRY }}" ] && [ -z "${{ env.ECR_PUBLIC_ALIAS }}" ]; then
-            echo "ERROR: PUBLIC_REGISTRY or ECR_PUBLIC_ALIAS missing."
+          # fail fast if registry is empty (avoids invalid tag like /repo:tag)
+          if [ -z "${{ steps.login-ecr.outputs.registry }}" ]; then
+            echo "ERROR: ECR registry value is empty. Check login step and AWS credentials."
             exit 1
           fi
 
-          PUBLIC_REG=public.ecr.aws/${{ env.ECR_PUBLIC_ALIAS }}
+          REG=${{ steps.login-ecr.outputs.registry }}
           REPO=${{ env.ECR_REPOSITORY }}
           TAG=${{ env.IMAGE_TAG }}
 
-          # build locally
           docker build -t ${REPO}:${TAG} .
-
-          # tag for public ECR (format: public.ecr.aws/<alias>/<repo>:<tag>)
-          docker tag ${REPO}:${TAG} ${PUBLIC_REG}/${REPO}:${TAG}
-          docker tag ${REPO}:${TAG} ${PUBLIC_REG}/${REPO}:latest
-
-          # push both tags
-          docker push ${PUBLIC_REG}/${REPO}:${TAG}
-          docker push ${PUBLIC_REG}/${REPO}:latest
-
-      - name: Summary
-        run: |
-          echo "Pushed to public ECR: public.ecr.aws/${{ env.ECR_PUBLIC_ALIAS }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}"
+          docker tag ${REPO}:${TAG} ${REG}/${REPO}:${TAG}
+          docker tag ${REPO}:${TAG} ${REG}/${REPO}:latest
+          docker push ${REG}/${REPO}:${TAG}
+          docker push ${REG}/${REPO}:latest
