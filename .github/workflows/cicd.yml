@@ -9,7 +9,7 @@ jobs:
   build-push:
     runs-on: ubuntu-latest
     env:
-      ECR_REPOSITORY: mediplux
+      ECR_REPOSITORY: mediplux-ecr
       IMAGE_TAG: v1
 
     steps:
