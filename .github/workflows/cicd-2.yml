@@ -54,7 +54,6 @@ jobs:
     # run only after build-push completes successfully
     needs: build-push
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     # Keep sensitive values as repo secrets (see explanation below)
     steps:
       - name: Deploy to EC2 via SSH
@@ -65,8 +64,6 @@ jobs:
           host: ${{ secrets.EC2_HOST }}           # EC2 public IP or DNS
           username: ${{ secrets.EC2_USER }}       # user (e.g., ubuntu)
           key: ${{ secrets.EC2_SSH_KEY }}         # private SSH key (PEM) as secret
-          port: ${{ secrets.EC2_SSH_PORT }}       # optional, default 22 (can be empty)
-          timeout: 60
           script: |
             set -e
 
