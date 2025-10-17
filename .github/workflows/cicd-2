@@ -1,0 +1,103 @@
+name: Build and Push to ECR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    env:
+      ECR_REPOSITORY: mediplux-ecr
+      IMAGE_TAG: v1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR (private registry)
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Optional: show which registry we will use (safe)
+      - name: Show registry (diagnostic)
+        run: echo "Registry = '${{ steps.login-ecr.outputs.registry }}'"
+
+      - name: Build, tag, and push image to Amazon ECR
+        run: |
+          # fail fast if registry is empty (avoids invalid tag like /repo:tag)
+          if [ -z "${{ steps.login-ecr.outputs.registry }}" ]; then
+            echo "ERROR: ECR registry value is empty. Check login step and AWS credentials."
+            exit 1
+          fi
+
+          REG=${{ steps.login-ecr.outputs.registry }}
+          REPO=${{ env.ECR_REPOSITORY }}
+          TAG=${{ env.IMAGE_TAG }}
+
+          docker build -t ${REPO}:${TAG} .
+          docker tag ${REPO}:${TAG} ${REG}/${REPO}:${TAG}
+          docker tag ${REPO}:${TAG} ${REG}/${REPO}:latest
+          docker push ${REG}/${REPO}:${TAG}
+          docker push ${REG}/${REPO}:latest
+
+  # ---------------------------
+  # NEW JOB: deploy-to-ec2
+  # ---------------------------
+  deploy-to-ec2:
+    # run only after build-push completes successfully
+    needs: build-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Keep sensitive values as repo secrets (see explanation below)
+    steps:
+      - name: Deploy to EC2 via SSH
+        # use an SSH action to run commands on the remote EC2 host
+        uses: appleboy/ssh-action@v0.1.9
+        with:
+          # These must be set as GitHub repository Secrets
+          host: ${{ secrets.EC2_HOST }}           # EC2 public IP or DNS
+          username: ${{ secrets.EC2_USER }}       # user (e.g., ubuntu)
+          key: ${{ secrets.EC2_SSH_KEY }}         # private SSH key (PEM) as secret
+          port: ${{ secrets.EC2_SSH_PORT }}       # optional, default 22 (can be empty)
+          timeout: 60
+          script: |
+            set -e
+
+            # 1) Variables (on remote) - registry, repo, tag
+            REG="{{ steps.login-ecr.outputs.registry }}"
+            REPO="{{ env.ECR_REPOSITORY }}"
+            TAG="{{ env.IMAGE_TAG }}"
+
+            echo "Deploy: registry=$REG repo=$REPO tag=$TAG"
+
+            # 2) Authenticate docker on the EC2 host to ECR using the instance's IAM role
+            #    NOTE: This assumes the EC2 instance has AWS CLI installed and an instance role
+            #    with permission to access ECR. If it does NOT, either install/configure aws on the EC2 host,
+            #    or modify this script to use credentials.
+            aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" \
+              | docker login --username AWS --password-stdin "${REG}"
+
+            # 3) Pull the new image
+            docker pull "${REG}/${REPO}:${TAG}"
+
+            # 4) Stop & remove the existing container (if any) then start the new one
+            #    Adjust the run options (ports, name) below to match your app needs
+            APP_NAME="mediplux-web"
+            docker rm -f "${APP_NAME}" || true
+
+            # Run container: map host port 80 -> container port 80 as an example.
+            docker run -d \
+              --name "${APP_NAME}" \
+              --restart=always \
+              -p 80:80 \
+              "${REG}/${REPO}:${TAG}"
+
+            # 5) Output a quick status
+            docker ps --filter "name=${APP_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
