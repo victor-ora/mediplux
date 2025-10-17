@@ -51,46 +51,50 @@ jobs:
   # NEW JOB: deploy-to-ec2
   # ---------------------------
   deploy-to-ec2:
-  needs: build-push
-  runs-on: ubuntu-latest
-  timeout-minutes: 15
-  steps:
-    - name: Deploy to EC2 via SSH
-      uses: appleboy/ssh-action@v0.1.9
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USER }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        port: ${{ secrets.EC2_SSH_PORT }}
-        timeout: 60
-        script: |
-          set -e
+    # run only after build-push completes successfully
+    needs: build-push
+    runs-on: ubuntu-latest
+    # Keep sensitive values as repo secrets (see explanation below)
+    steps:
+      - name: Deploy to EC2 via SSH
+        # use an SSH action to run commands on the remote EC2 host
+        uses: appleboy/ssh-action@v0.1.9
+        with:
+          # These must be set as GitHub repository Secrets
+          host: ${{ secrets.EC2_HOST }}           # EC2 public IP or DNS
+          username: ${{ secrets.EC2_USER }}       # user (e.g., ubuntu)
+          key: ${{ secrets.EC2_SSH_KEY }}         # private SSH key (PEM) as secret
+          script: |
+            set -e
 
-          # Build registry from known secrets (expanded by Actions before running remotely)
-          REG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com"
-          REPO="${{ env.ECR_REPOSITORY }}"
-          TAG="${{ env.IMAGE_TAG }}"
+            # 1) Variables (on remote) - registry, repo, tag
+            REG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com"
+            REPO="${{ env.ECR_REPOSITORY }}"
+            TAG="${{ env.IMAGE_TAG }}"
 
-          echo "Deploy: registry=$REG repo=$REPO tag=$TAG"
+            echo "Deploy: registry=$REG repo=$REPO tag=$TAG"
 
-          # Ensure aws CLI is available (on the EC2 host). If not, the next command will fail.
-          # This login expects the EC2 instance to have an Instance Role with ECR permissions
-          aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" \
-            | docker login --username AWS --password-stdin "${REG}"
+            # 2) Authenticate docker on the EC2 host to ECR using the instance's IAM role
+            #    NOTE: This assumes the EC2 instance has AWS CLI installed and an instance role
+            #    with permission to access ECR. If it does NOT, either install/configure aws on the EC2 host,
+            #    or modify this script to use credentials.
+            aws ecr get-login-password --region "${{ secrets.AWS_REGION }}" \
+              | docker login --username AWS --password-stdin "${REG}"
 
-          # Pull the image that we previously pushed in build-push
-          docker pull "${REG}/${REPO}:${TAG}"
+            # 3) Pull the new image
+            docker pull "${REG}/${REPO}:${TAG}"
 
-          # Stop & remove existing container (if any) and run the new one
-          APP_NAME="mediplux-web"
-          docker rm -f "${APP_NAME}" || true
+            # 4) Stop & remove the existing container (if any) then start the new one
+            #    Adjust the run options (ports, name) below to match your app needs
+            APP_NAME="mediplux-web"
+            docker rm -f "${APP_NAME}" || true
 
-          docker run -d \
-            --name mediplux-web2 \
-            --restart=always \
-            -p 80:80 \
-            "${REG}/${REPO}:${TAG}"
+            # Run container: map host port 80 -> container port 80 as an example.
+            docker run -d \
+              --name mediplux-web2 \
+              --restart=always \
+              -p 80:80 \
+              "${REG}/${REPO}:${TAG}"
 
-          # Output quick status so logs show the running container and ports
-          docker ps --filter "name=mediplux-web2" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
-
+            # 5) Output a quick status
+            docker ps --filter "name=mediplux-web2" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
