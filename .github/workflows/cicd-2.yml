@@ -3,12 +3,13 @@ name: Build, Push and Deploy to EC2
 on:
   workflow_dispatch:
 
+env:  # Moved here so it's shared across ALL jobs
+  ECR_REPOSITORY: mediplux-ecr
+  IMAGE_TAG: v1
+
 jobs:
   build-push:
     runs-on: ubuntu-latest
-    env:
-      ECR_REPOSITORY: mediplux-ecr
-      IMAGE_TAG: v1
 
     steps:
       - name: Checkout code
@@ -68,11 +69,24 @@ jobs:
             set -e
 
             # 1) Variables (on remote) - registry, repo, tag
+            #    NOTE: These use GitHub expressions, which are expanded BEFORE sending to SSH
             REG="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com"
             REPO="${{ env.ECR_REPOSITORY }}"
             TAG="${{ env.IMAGE_TAG }}"
 
+            # Fail fast if any var is empty (prevents invalid reference format)
+            if [ -z "$REG" ] || [ -z "$REPO" ] || [ -z "$TAG" ]; then
+              echo "ERROR: Missing required variables (REG=$REG, REPO=$REPO, TAG=$TAG). Check workflow env/secrets."
+              exit 1
+            fi
+
             echo "Deploy: registry=$REG repo=$REPO tag=$TAG"
+
+            # Check if AWS CLI is installed (install if not, assuming Ubuntu/Debian)
+            if ! command -v aws &> /dev/null; then
+              echo "AWS CLI not found. Installing..."
+              sudo apt update && sudo apt install -y awscli
+            fi
 
             # 2) Authenticate docker on the EC2 host to ECR using the instance's IAM role
             #    NOTE: This assumes the EC2 instance has AWS CLI installed and an instance role
@@ -86,12 +100,12 @@ jobs:
 
             # 4) Stop & remove the existing container (if any) then start the new one
             #    Adjust the run options (ports, name) below to match your app needs
-            APP_NAME="mediplux-web"
+            APP_NAME="mediplux-web"  # Consistent name
             docker rm -f "${APP_NAME}" || true
 
             # Run container: map host port 80 -> container port 80 as an example.
             docker run -d \
-              --name mediplux-web2 \
+              --name mediplux-web2 \  # Use variable for consistency
               --restart=always \
               -p 80:80 \
               "${REG}/${REPO}:${TAG}"
