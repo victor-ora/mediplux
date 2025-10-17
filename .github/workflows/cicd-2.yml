@@ -100,15 +100,15 @@ jobs:
 
             # 4) Stop & remove the existing container (if any) then start the new one
             #    Adjust the run options (ports, name) below to match your app needs
-            APP_NAME="mediplux-web"  # Consistent name
-            docker rm -f "${APP_NAME}" || true
+            # APP_NAME="mediplux-web"  # Consistent name
+            # docker rm -f "${APP_NAME}" || true
 
             # Run container: map host port 80 -> container port 80 as an example.
             docker run -d \
-              --name "${APP_NAME}" \  # Use variable for consistency
+              --name mediplus-web2 \  # Use variable for consistency
               --restart=always \
               -p 80:80 \
               "${REG}/${REPO}:${TAG}"
 
             # 5) Output a quick status
-            docker ps --filter "name=${APP_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+            # docker ps --filter "name=${APP_NAME}" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
