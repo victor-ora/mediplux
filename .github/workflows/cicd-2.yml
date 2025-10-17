@@ -1,4 +1,56 @@
-deploy-to-ec2:
+name: Build, Push and Deploy to EC2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    env:
+      ECR_REPOSITORY: mediplux-ecr
+      IMAGE_TAG: v1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR (private registry)
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Optional: show which registry we will use (safe)
+      - name: Show registry (diagnostic)
+        run: echo "Registry = '${{ steps.login-ecr.outputs.registry }}'"
+
+      - name: Build, tag, and push image to Amazon ECR
+        run: |
+          # fail fast if registry is empty (avoids invalid tag like /repo:tag)
+          if [ -z "${{ steps.login-ecr.outputs.registry }}" ]; then
+            echo "ERROR: ECR registry value is empty. Check login step and AWS credentials."
+            exit 1
+          fi
+
+          REG=${{ steps.login-ecr.outputs.registry }}
+          REPO=${{ env.ECR_REPOSITORY }}
+          TAG=${{ env.IMAGE_TAG }}
+
+          docker build -t ${REPO}:${TAG} .
+          docker tag ${REPO}:${TAG} ${REG}/${REPO}:${TAG}
+          docker tag ${REPO}:${TAG} ${REG}/${REPO}:latest
+          docker push ${REG}/${REPO}:${TAG}
+          docker push ${REG}/${REPO}:latest
+
+  # ---------------------------
+  # NEW JOB: deploy-to-ec2
+  # ---------------------------
+  deploy-to-ec2:
   needs: build-push
   runs-on: ubuntu-latest
   timeout-minutes: 15
@@ -41,3 +93,4 @@ deploy-to-ec2:
 
           # Output quick status so logs show the running container and ports
           docker ps --filter "name=mediplux-web2" --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
+
