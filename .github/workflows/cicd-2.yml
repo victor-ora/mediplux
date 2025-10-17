@@ -105,7 +105,7 @@ jobs:
 
             # Run container: map host port 80 -> container port 80 as an example.
             docker run -d \
-              --name mediplus-web2 \  # Use variable for consistency
+              --name mediplux-web2 \
               --restart=always \
               -p 80:80 \
               "${REG}/${REPO}:${TAG}"
